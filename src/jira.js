@@ -1,11 +1,10 @@
 const axios = require("axios");
 
-function makeClient({ jiraBaseUrl, jiraEmail, jiraToken }) {
-  const auth = Buffer.from(`${jiraEmail}:${jiraToken}`).toString("base64");
+function makeClient({ jiraBaseUrl, jiraToken }) {
   const http = axios.create({
     baseURL: jiraBaseUrl,
     headers: {
-      Authorization: `Basic ${auth}`,
+      Authorization: `Bearer ${jiraToken}`,
       Accept: "application/json",
       "Content-Type": "application/json",
     },
@@ -17,7 +16,7 @@ function makeClient({ jiraBaseUrl, jiraEmail, jiraToken }) {
     let startAt = 0;
     const pageSize = 100;
     while (true) {
-      const res = await http.post("/rest/api/3/search", {
+      const res = await http.post("/rest/api/2/search", {
         jql,
         startAt,
         maxResults: pageSize,

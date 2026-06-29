@@ -21,7 +21,6 @@ function loadCustomers(configPath) {
 function loadEnv() {
   const required = [
     "JIRA_BASE_URL",
-    "JIRA_EMAIL",
     "JIRA_API_TOKEN",
     "ASANA_PAT",
   ];
@@ -30,7 +29,6 @@ function loadEnv() {
   }
   return {
     jiraBaseUrl: process.env.JIRA_BASE_URL.replace(/\/$/, ""),
-    jiraEmail: process.env.JIRA_EMAIL,
     jiraToken: process.env.JIRA_API_TOKEN,
     asanaPat: process.env.ASANA_PAT,
     lookbackMinutes: parseInt(process.env.LOOKBACK_MINUTES || "60", 10),
