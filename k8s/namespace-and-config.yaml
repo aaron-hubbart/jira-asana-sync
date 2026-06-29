@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jira-asana-sync
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jira-asana-sync-config
+  namespace: jira-asana-sync
+data:
+  customers.yaml: |
+    # Replace this with your real customers.yaml contents, or use:
+    #   kubectl -n jira-asana-sync create configmap jira-asana-sync-config \
+    #     --from-file=customers.yaml=./customers.yaml --dry-run=client -o yaml | kubectl apply -f -
+    customers: []

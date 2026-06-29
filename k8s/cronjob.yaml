@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: jira-asana-sync
+  namespace: jira-asana-sync
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: gcr.io/tam-aaron-hubbart/jira-asana-sync:latest
+              imagePullPolicy: Always
+              env:
+                - name: LOOKBACK_MINUTES
+                  value: "20"
+                - name: CONFIG_PATH
+                  value: /config/customers.yaml
+                - name: DB_PATH
+                  value: /data/state.db
+              envFrom:
+                - secretRef:
+                    name: jira-asana-sync-secrets
+              volumeMounts:
+                - name: state
+                  mountPath: /data
+                - name: config
+                  mountPath: /config
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: state
+              persistentVolumeClaim:
+                claimName: jira-asana-sync-state
+            - name: config
+              configMap:
+                name: jira-asana-sync-config

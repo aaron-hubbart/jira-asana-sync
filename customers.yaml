@@ -1,0 +1,59 @@
+# Per-customer mapping.
+# One entry per customer. The script loops over all of them every run.
+#
+# Required fields per customer:
+#   name              - display name, used in logs
+#   jira_jql          - JQL that selects this customer's relevant issues.
+#                       The script appends "AND updated >= -Nm" automatically.
+#   asana_project_gid - Asana project to write tasks into
+#   asana_section_gid - section within that project named "Tickets"
+#
+# Status statuses are auto-discovered from Jira per issue and written to the
+# Asana custom field named "Jira Status" (enum). New status values are added
+# to the enum on the fly. The script also writes the issue key into a text
+# custom field named "Jira Key".
+#
+# To find Asana GIDs:
+#   curl -H "Authorization: Bearer $ASANA_PAT" \
+#        https://app.asana.com/api/1.0/projects/<project_gid>/sections
+
+customers:
+  - name: Bank of America
+    jira_jql: 'project = BOFA AND "Account" = "Bank of America"'
+    asana_project_gid: "REPLACE_ME"
+    asana_section_gid: "REPLACE_ME"
+
+  - name: JPMC
+    jira_jql: 'project = JPMC'
+    asana_project_gid: "REPLACE_ME"
+    asana_section_gid: "REPLACE_ME"
+
+  - name: Wells Fargo
+    jira_jql: 'project = WF'
+    asana_project_gid: "REPLACE_ME"
+    asana_section_gid: "REPLACE_ME"
+
+  - name: UPS
+    jira_jql: 'project = UPS'
+    asana_project_gid: "REPLACE_ME"
+    asana_section_gid: "REPLACE_ME"
+
+  - name: Amex
+    jira_jql: 'project = AMEX'
+    asana_project_gid: "REPLACE_ME"
+    asana_section_gid: "REPLACE_ME"
+
+  - name: Toyota
+    jira_jql: 'project = TOY'
+    asana_project_gid: "REPLACE_ME"
+    asana_section_gid: "REPLACE_ME"
+
+  - name: First American
+    jira_jql: 'project = FAF'
+    asana_project_gid: "REPLACE_ME"
+    asana_section_gid: "REPLACE_ME"
+
+  - name: Optum
+    jira_jql: 'project = OPTUM'
+    asana_project_gid: "REPLACE_ME"
+    asana_section_gid: "REPLACE_ME"
