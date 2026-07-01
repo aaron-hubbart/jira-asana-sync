@@ -98,14 +98,17 @@ function jobStatus(j) {
   return j.status && j.status.active ? "Running" : "Pending";
 }
 
-async function createRun(mode) {
+async function createRun(mode, opts = {}) {
   const dry = mode === "dry-run";
-  // Honor the CronJob's concurrencyPolicy: Forbid.
+  const backfill = mode === "backfill";
+  // Honor the CronJob's concurrencyPolicy: Forbid (also protects the shared SQLite state).
   if (await anyActiveJob()) throw conflict("a sync Job is already active (concurrencyPolicy: Forbid)");
 
   const { body: cj } = await batch.readNamespacedCronJob(CRONJOB, NS);
   const suffix = Date.now().toString().slice(-6);
-  const name = (dry ? "dry-run-" : "sync-manual-") + suffix;
+  const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 30) || "customer";
+  const name = backfill ? `backfill-${slug(opts.customer)}-${suffix}` : (dry ? "dry-run-" : "sync-manual-") + suffix;
+  const trigger = backfill ? "backfill" : dry ? "dry-run" : "manual";
 
   const job = {
     apiVersion: "batch/v1",
@@ -113,19 +116,23 @@ async function createRun(mode) {
     metadata: {
       name,
       namespace: NS,
-      labels: { "syncops/trigger": dry ? "dry-run" : "manual" },
+      labels: { "syncops/trigger": trigger },
       annotations: { "cronjob.kubernetes.io/instantiate": "manual" },
     },
     spec: JSON.parse(JSON.stringify(cj.spec.jobTemplate.spec)),
   };
-  if (dry) {
-    const c = job.spec.template.spec.containers.find((x) => x.name === CONTAINER) || job.spec.template.spec.containers[0];
-    c.env = c.env || [];
-    c.env.push({ name: "DRY_RUN", value: "true" });
+
+  const c = job.spec.template.spec.containers.find((x) => x.name === CONTAINER) || job.spec.template.spec.containers[0];
+  c.env = c.env || [];
+  const setEnv = (k, v) => { const e = c.env.find((x) => x.name === k); if (e) e.value = String(v); else c.env.push({ name: k, value: String(v) }); };
+  if (dry) setEnv("DRY_RUN", "true");
+  if (backfill) {
+    setEnv("ONLY_CUSTOMER", opts.customer);
+    setEnv("LOOKBACK_MINUTES", opts.lookbackMinutes != null ? opts.lookbackMinutes : 0); // 0 = full sync
   }
 
   await batch.createNamespacedJob(NS, job);
-  return { name, trigger: dry ? "dry-run" : "manual", startedAt: new Date().toISOString(), status: "Running" };
+  return { name, trigger, startedAt: new Date().toISOString(), status: "Running" };
 }
 
 async function listRuns() {

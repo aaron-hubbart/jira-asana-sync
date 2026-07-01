@@ -1,0 +1,41 @@
+# One-time backfill for a single newly-added customer.
+# Full sync (LOOKBACK_MINUTES=0 -> no "updated >= -Nm" filter), scoped to ONLY_CUSTOMER,
+# so it loads everything that customer's JQL matches without touching the others.
+#
+# Edit ONLY_CUSTOMER (and the metadata.name) per run, then:
+#   kubectl apply -f k8s/backfill-job.yaml
+#   kubectl -n jira-asana-sync logs -l job-name=backfill-boa -f
+# Delete it when done:  kubectl -n jira-asana-sync delete job backfill-boa
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backfill-boa
+  namespace: jira-asana-sync
+  labels: { syncops/trigger: backfill }
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: sync
+          image: gcr.io/tam-aaron-hubbart/jira-asana-sync:latest
+          imagePullPolicy: Always
+          env:
+            - { name: LOOKBACK_MINUTES, value: "0" }              # 0 = full sync (no time filter)
+            - { name: ONLY_CUSTOMER,    value: "Bank of America" } # exact customer name
+            - { name: CONFIG_PATH,      value: /config/customers.yaml }
+            - { name: DB_PATH,          value: /data/state.db }
+          envFrom:
+            - secretRef: { name: jira-asana-sync-secrets }
+          volumeMounts:
+            - { name: state,  mountPath: /data }
+            - { name: config, mountPath: /config, readOnly: true }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+      volumes:
+        - name: state
+          persistentVolumeClaim: { claimName: jira-asana-sync-state }
+        - name: config
+          configMap: { name: jira-asana-sync-config }

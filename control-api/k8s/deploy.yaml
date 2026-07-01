@@ -1,5 +1,5 @@
-# Control API + static web, behind one Ingress with IAP.
-# Namespace assumed to exist (created by jira-asana-sync/k8s/namespace-and-config.yaml).
+# Control API + static web, exposed via the cluster's nginx ingress controller
+# (same pattern as your other *.es-sandbox.com tools).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,6 +18,9 @@ spec:
           ports: [{ containerPort: 8080 }]
           env:
             - { name: SYNC_NAMESPACE, value: jira-asana-sync }
+            # No IAP in front of nginx, so don't require the IAP identity header.
+            # Add nginx auth (basic-auth / oauth2-proxy) if you need to lock it down.
+            - { name: REQUIRE_IAP, value: "false" }
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
           resources:
@@ -29,7 +32,6 @@ kind: Service
 metadata:
   name: syncops-api
   namespace: jira-asana-sync
-  annotations: { cloud.google.com/backend-config: '{"default":"syncops-iap"}' }
 spec:
   selector: { app: syncops-api }
   ports: [{ port: 80, targetPort: 8080 }]
@@ -58,23 +60,9 @@ kind: Service
 metadata:
   name: syncops-web
   namespace: jira-asana-sync
-  annotations: { cloud.google.com/backend-config: '{"default":"syncops-iap"}' }
 spec:
   selector: { app: syncops-web }
   ports: [{ port: 80, targetPort: 8080 }]
----
-# Turn on Identity-Aware Proxy for BOTH backends. Create the OAuth client and
-# store it in a Secret named syncops-iap-oauth (keys: client_id, client_secret).
-apiVersion: cloud.google.com/v1
-kind: BackendConfig
-metadata:
-  name: syncops-iap
-  namespace: jira-asana-sync
-spec:
-  iap:
-    enabled: true
-    oauthclientCredentials:
-      secretName: syncops-iap-oauth
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -82,12 +70,24 @@ metadata:
   name: syncops
   namespace: jira-asana-sync
   annotations:
-    kubernetes.io/ingress.class: "gce"
-    # networking.gke.io/managed-certificates: syncops-cert   # add a ManagedCertificate for HTTPS
+    kubernetes.io/ingress.class: "nginx"
+    # SSE: the /runs/:name/logs stream needs buffering off + a long read timeout.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # TLS via cert-manager — set this to the SAME issuer your dashboard/timebook use.
+    # If you don't use cert-manager, delete this line and the tls: block below.
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [jira-sync.es-sandbox.com]
+      secretName: syncops-tls
   rules:
-    - http:
+    - host: jira-sync.es-sandbox.com
+      http:
         paths:
+          # More specific path first so /api doesn't fall into the web catch-all.
           - path: /api
             pathType: Prefix
             backend: { service: { name: syncops-api, port: { number: 80 } } }

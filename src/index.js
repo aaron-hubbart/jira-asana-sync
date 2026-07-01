@@ -9,7 +9,8 @@ function log(level, msg, extra) {
 }
 
 function buildJqlWithLookback(baseJql, minutes) {
-  return `(${baseJql}) AND updated >= -${minutes}m`;
+  // minutes <= 0 => full sync (no time filter). Used for one-time backfills.
+  return minutes > 0 ? `(${baseJql}) AND updated >= -${minutes}m` : baseJql;
 }
 
 function buildAsanaName(issue) {
@@ -50,6 +51,12 @@ async function processCustomer(customer, ctx) {
       projectGid,
       sectionGid: sectionGid || "(dry-run: would create)",
     });
+    const cf = await asana.ensureCustomFields(projectGid, { create: !env.dryRun });
+    if (cf.created && cf.created.length) {
+      log("info", "created custom fields", { customer: customer.name, fields: cf.created });
+    } else if (cf.wouldCreate && cf.wouldCreate.length) {
+      log("info", "would create custom fields", { customer: customer.name, fields: cf.wouldCreate });
+    }
   } catch (e) {
     log("error", "asana resolve failed", { customer: customer.name, error: e.message });
     return { created: 0, updated: 0, errors: 1 };
@@ -123,12 +130,19 @@ async function processCustomer(customer, ctx) {
 
 async function main() {
   const env = loadEnv();
-  const customers = loadCustomers(env.configPath);
+  const allCustomers = loadCustomers(env.configPath);
+  const customers = env.onlyCustomer
+    ? allCustomers.filter((c) => c.name === env.onlyCustomer)
+    : allCustomers;
+  if (env.onlyCustomer && customers.length === 0) {
+    log("fatal", `ONLY_CUSTOMER '${env.onlyCustomer}' not found in customers.yaml`);
+    process.exit(1);
+  }
   const db = state.open(env.dbPath);
   const jira = jiraModule.makeClient(env);
   const asana = asanaModule.makeClient(env);
 
-  log("info", "run started", { customers: customers.length, dryRun: env.dryRun, lookbackMinutes: env.lookbackMinutes });
+  log("info", "run started", { customers: customers.length, dryRun: env.dryRun, lookbackMinutes: env.lookbackMinutes, onlyCustomer: env.onlyCustomer || null, fullSync: env.lookbackMinutes <= 0 });
 
   const totals = { created: 0, updated: 0, errors: 0, total: 0 };
   for (const c of customers) {

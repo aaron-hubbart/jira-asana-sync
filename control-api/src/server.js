@@ -5,6 +5,10 @@ const { validateCustomers } = require("./validate");
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
+// Health check for kubelet probes. MUST be registered before the auth
+// middleware below, otherwise probes (which carry no IAP header) get 401.
+app.get("/healthz", (req, res) => res.json({ ok: true }));
+
 // --- Auth (Identity-Aware Proxy) --------------------------------------------
 // Front this service with IAP on the GKE Ingress/LB. IAP injects a verified
 // identity header. In production you should VERIFY the signed JWT in
@@ -36,9 +40,6 @@ const wrap = (fn) => (req, res) =>
   });
 
 const V = "/api/v1";
-
-// Health (no auth needed for k8s probes — mount before auth if you prefer).
-app.get("/healthz", (req, res) => res.json({ ok: true }));
 
 // --- Config (customers.yaml ConfigMap) --------------------------------------
 app.get(`${V}/config`, wrap(async (req, res) => {
@@ -75,9 +76,12 @@ app.get(`${V}/runs`, wrap(async (req, res) => {
 }));
 
 app.post(`${V}/runs`, wrap(async (req, res) => {
-  const mode = req.body.mode === "dry-run" ? "dry-run" : "manual";
-  const out = await k8s.createRun(mode);
-  audit(req, "run.create", { name: out.name, mode });
+  const mode = ["dry-run", "backfill"].includes(req.body.mode) ? req.body.mode : "manual";
+  if (mode === "backfill" && !req.body.customer) {
+    return res.status(400).json({ error: { code: "bad_request", message: "backfill requires 'customer'" } });
+  }
+  const out = await k8s.createRun(mode, { customer: req.body.customer, lookbackMinutes: req.body.lookbackMinutes });
+  audit(req, "run.create", { name: out.name, mode, customer: req.body.customer });
   res.status(202).json(out);
 }));
 

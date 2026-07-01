@@ -8,7 +8,7 @@ One-way sync from Jira to Asana. Reads recently updated Jira issues per customer
 
 Every 10 minutes the CronJob runs `node src/index.js`, which loops over `customers.yaml` and for each entry:
 
-1. Resolves `asana_project_name` to a project GID (searching your workspaces), then finds the `Tickets` section, creating it if missing.
+1. Resolves `asana_project_name` to a project GID (searching your workspaces), finds the `Tickets` section (creating it if missing), and ensures the `Jira Key` and `Jira Status` custom fields exist on the project (creating + attaching them if missing).
 2. Runs the configured JQL with `AND updated >= -20m` appended.
 3. For each issue, looks up the Asana task GID in a SQLite state DB. If missing, falls back to an Asana search by Jira Key custom field.
 4. If no Asana task exists, creates one in the project, moves it into the Tickets section, sets the Jira Key and Jira Status fields. New status enum values are added on the fly.
@@ -20,10 +20,7 @@ State lives in `/data/state.db` on a 1Gi PVC. Losing the PVC is recoverable, the
 
 1. Jira API token: id.atlassian.com, Profile, Security, Create API token.
 2. Asana PAT: app.asana.com/0/my-apps.
-3. On each customer's Asana project, add two custom fields:
-   - `Jira Key` (text)
-   - `Jira Status` (single-select, no initial options needed)
-4. Know the **exact name** of each customer's Asana project. That's it — the `Tickets` section is created automatically on the first run if it isn't already there.
+3. Know the **exact name** of each customer's Asana project. That's it — the `Tickets` section and the `Jira Key` / `Jira Status` custom fields are all created automatically on the first run if they aren't already there.
 
 ## Configure `customers.yaml`
 

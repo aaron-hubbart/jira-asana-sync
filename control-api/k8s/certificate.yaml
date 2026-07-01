@@ -1,0 +1,10 @@
+# Google-managed TLS certificate for the SyncOps hostname.
+# Provisions automatically once DNS points at the Ingress IP (15–60 min).
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: syncops-cert
+  namespace: jira-asana-sync
+spec:
+  domains:
+    - jira-sync.es-sandbox.com

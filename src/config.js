@@ -43,6 +43,7 @@ function loadEnv() {
     lookbackMinutes: parseInt(process.env.LOOKBACK_MINUTES || "60", 10),
     dbPath: process.env.DB_PATH || "/data/state.db",
     dryRun: process.env.DRY_RUN === "true",
+    onlyCustomer: process.env.ONLY_CUSTOMER || null,
     configPath: process.env.CONFIG_PATH || path.join(__dirname, "..", "customers.yaml"),
   };
 }

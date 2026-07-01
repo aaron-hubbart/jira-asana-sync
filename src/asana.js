@@ -133,7 +133,9 @@ function makeClient({ asanaPat }) {
     const fields = await getProjectFields(projectGid);
     const keyField = fields[CUSTOM_FIELD_JIRA_KEY];
     if (!keyField) {
-      throw new Error(`Project ${projectGid} is missing the '${CUSTOM_FIELD_JIRA_KEY}' custom field`);
+      // Field not present yet (e.g. dry run, or brand-new project) — can't search,
+      // so treat as "no existing task". On real runs ensureCustomFields creates it first.
+      return null;
     }
     const workspaceGid = await getProjectWorkspace(projectGid);
     const res = await http.get(`/workspaces/${workspaceGid}/tasks/search`, {
@@ -156,6 +158,63 @@ function makeClient({ asanaPat }) {
     const wsGid = res.data.data.workspace.gid;
     workspaceCache.set(projectGid, wsGid);
     return wsGid;
+  }
+
+  // Ensure the two custom fields the sync needs exist on the project.
+  // Fields are workspace-scoped, so we find-or-create by name at the workspace
+  // level (avoids duplicates across customer projects) then attach to the project.
+  async function listWorkspaceCustomFields(wsGid) {
+    const out = [];
+    let offset = null;
+    do {
+      const params = { limit: 100, opt_fields: "name,resource_subtype,gid" };
+      if (offset) params.offset = offset;
+      const res = await http.get(`/workspaces/${wsGid}/custom_fields`, { params });
+      out.push(...res.data.data);
+      offset = res.data.next_page ? res.data.next_page.offset : null;
+    } while (offset);
+    return out;
+  }
+
+  async function findOrCreateWorkspaceField(wsGid, name, subtype) {
+    const existing = (await listWorkspaceCustomFields(wsGid)).find(
+      (f) => f.name === name && f.resource_subtype === subtype
+    );
+    if (existing) return existing.gid;
+    const data = { workspace: wsGid, name, resource_subtype: subtype, type: subtype };
+    if (subtype === "enum") data.enum_options = []; // options are added on the fly as statuses appear
+    try {
+      const res = await http.post(`/custom_fields`, { data });
+      return res.data.data.gid;
+    } catch (e) {
+      // Some workspaces reject an enum created with no options — retry with a seed.
+      if (subtype === "enum") {
+        const res = await http.post(`/custom_fields`, { data: { ...data, enum_options: [{ name: "Unmapped" }] } });
+        return res.data.data.gid;
+      }
+      throw e;
+    }
+  }
+
+  async function ensureCustomFields(projectGid, { create = true } = {}) {
+    const fields = await getProjectFields(projectGid);
+    const need = [];
+    if (!fields[CUSTOM_FIELD_JIRA_KEY]) need.push([CUSTOM_FIELD_JIRA_KEY, "text"]);
+    if (!fields[CUSTOM_FIELD_JIRA_STATUS]) need.push([CUSTOM_FIELD_JIRA_STATUS, "enum"]);
+    if (need.length === 0) return { created: [] };
+    if (!create) return { created: [], wouldCreate: need.map((n) => n[0]) };
+
+    const wsGid = await getProjectWorkspace(projectGid);
+    const created = [];
+    for (const [name, subtype] of need) {
+      const gid = await findOrCreateWorkspaceField(wsGid, name, subtype);
+      await http.post(`/projects/${projectGid}/addCustomFieldSetting`, {
+        data: { custom_field: gid, is_important: false },
+      });
+      created.push(name);
+    }
+    fieldCache.delete(projectGid); // refresh so the new fields (gids + enum options) are picked up
+    return { created };
   }
 
   async function createTask({ projectGid, sectionGid, name, notes, jiraKey, jiraStatus }) {
@@ -196,6 +255,7 @@ function makeClient({ asanaPat }) {
   return {
     resolveProjectGid,
     ensureSection,
+    ensureCustomFields,
     findTaskByJiraKey,
     createTask,
     updateTaskStatus,
