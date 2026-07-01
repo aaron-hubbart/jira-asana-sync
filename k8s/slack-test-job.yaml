@@ -1,0 +1,30 @@
+# One-off Slack integration test, run inside the cluster with the real secret.
+# Posts a sample New ticket + Ticket update to SLACK_TEST_CHANNEL, no Jira/Asana calls.
+#
+#   # edit SLACK_TEST_CHANNEL below, then:
+#   kubectl apply -f k8s/slack-test-job.yaml
+#   kubectl -n jira-asana-sync logs -l job-name=slack-test -f
+#   kubectl -n jira-asana-sync delete job slack-test
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: slack-test
+  namespace: jira-asana-sync
+  labels: { syncops/trigger: slack-test }
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: sync
+          image: gcr.io/tam-aaron-hubbart/jira-asana-sync:latest
+          imagePullPolicy: Always
+          command: ["node", "src/slack-test.js"]
+          env:
+            - { name: SLACK_TEST_CHANNEL, value: "C0ACTQSCWNB" }   # channel name or ID
+          envFrom:
+            - secretRef: { name: jira-asana-sync-secrets }          # supplies SLACK_BOT_TOKEN + JIRA_BASE_URL
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 256Mi }

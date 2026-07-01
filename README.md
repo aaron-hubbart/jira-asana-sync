@@ -13,6 +13,7 @@ Every 10 minutes the CronJob runs `node src/index.js`, which loops over `custome
 3. For each issue, looks up the Asana task GID in a SQLite state DB. If missing, falls back to an Asana search by Jira Key custom field.
 4. If no Asana task exists, creates one in the project, moves it into the Tickets section, sets the Jira Key and Jira Status fields. New status enum values are added on the fly.
 5. If a task exists and the status changed since last run, updates the Jira Status field.
+6. If the customer has a `slack_channel`, posts a **New ticket** message on create and a **Ticket update** message on status change (Ticket ID, Summary, Priority, Assignee, Reporter). Requires `SLACK_BOT_TOKEN`.
 
 State lives in `/data/state.db` on a 1Gi PVC. Losing the PVC is recoverable, the search fallback rebuilds the map on the next run.
 
@@ -21,6 +22,7 @@ State lives in `/data/state.db` on a 1Gi PVC. Losing the PVC is recoverable, the
 1. Jira API token: id.atlassian.com, Profile, Security, Create API token.
 2. Asana PAT: app.asana.com/0/my-apps.
 3. Know the **exact name** of each customer's Asana project. That's it — the `Tickets` section and the `Jira Key` / `Jira Status` custom fields are all created automatically on the first run if they aren't already there.
+4. (Optional, for Slack) Create a Slack app with a **Bot Token** (`xoxb-…`) with scopes `chat:write`, `channels:read`, `groups:read` (name→ID resolution) and `channels:join` (auto-join public channels). Install it to the workspace, put the token in the secret as `SLACK_BOT_TOKEN`, and set `slack_channel` per customer. For **public** channels the bot joins itself on first post; for **private** channels a member must `/invite @your-bot` (Slack has no bot self-join for private channels).
 
 ## Configure `customers.yaml`
 
@@ -29,6 +31,7 @@ customers:
   - name: Bank of America
     jira_jql: 'project = Support AND "Customer Domain" in ("bofa.com") AND (createdDate >= "2026-01-01" OR status not in (Resolved, Closed))'
     asana_project_name: "Bank of America — Support"
+    slack_channel: "#boa-support"     # optional; channel name or ID (C0123ABCD)
     # tickets_section: "Tickets"      # optional, this is the default
     # asana_workspace_gid: "1128..."  # optional, only if the name is ambiguous
     # asana_project_gid: "1214..."    # optional, skip name resolution entirely
@@ -62,7 +65,8 @@ kb -n jira-asana-sync create secret generic jira-asana-sync-secrets `
   --from-literal=JIRA_BASE_URL='https://camunda.atlassian.net' `
   --from-literal=JIRA_EMAIL='aaron.hubbart@camunda.com' `
   --from-literal=JIRA_API_TOKEN='<token>' `
-  --from-literal=ASANA_PAT='<pat>'
+  --from-literal=ASANA_PAT='<pat>' `
+  --from-literal=SLACK_BOT_TOKEN='xoxb-<token>'   # optional, enables Slack
 
 # Push the real customers.yaml into the ConfigMap
 kb -n jira-asana-sync create configmap jira-asana-sync-config `

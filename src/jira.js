@@ -20,7 +20,8 @@ function makeClient({ jiraBaseUrl, jiraToken }) {
         jql,
         startAt,
         maxResults: pageSize,
-        fields: ["summary", "status", "issuetype", "priority", "assignee", "updated", "description"],
+        // reporter added so Slack notifications can show who filed the ticket.
+        fields: ["summary", "status", "issuetype", "priority", "assignee", "reporter", "updated", "description"],
       });
       out.push(...res.data.issues);
       if (res.data.issues.length < pageSize || startAt + pageSize >= res.data.total) break;

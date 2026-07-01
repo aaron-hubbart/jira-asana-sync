@@ -17,5 +17,6 @@ customers:
   - name: Bank of America
     jira_jql: 'project = Support AND "Customer Domain" in ("bofa.com") AND (createdDate >= "2026-01-01" OR status not in (Resolved, Closed))'
     asana_project_name: "Bank of America — Support"
+    slack_channel: "C0123ABCD"
     # tickets_section: "Tickets"        # optional, this is the default
     # asana_workspace_gid: "1128..."    # optional, only if name is ambiguous

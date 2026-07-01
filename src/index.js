@@ -2,6 +2,7 @@ const { loadCustomers, loadEnv } = require("./config");
 const state = require("./state");
 const jiraModule = require("./jira");
 const asanaModule = require("./asana");
+const slackModule = require("./slack");
 
 function log(level, msg, extra) {
   const line = { ts: new Date().toISOString(), level, msg, ...(extra || {}) };
@@ -30,6 +31,22 @@ function buildAsanaNotes(issue, jiraBaseUrl) {
     "",
     "Synced by jira-asana-sync. Edits made here will not be pushed back to Jira.",
   ].join("\n");
+}
+
+// Best-effort Slack notification. Never fails the issue sync.
+async function notifySlack(ctx, customer, kind, issue, extra) {
+  if (!customer.slack_channel) return;
+  if (ctx.env.dryRun) {
+    log("info", "would notify slack", { channel: customer.slack_channel, jiraKey: issue.key, kind });
+    return;
+  }
+  if (!ctx.slack) return; // SLACK_BOT_TOKEN not set — Slack disabled
+  try {
+    await ctx.slack.notify(customer.slack_channel, kind, issue, extra);
+    log("info", "slack notified", { channel: customer.slack_channel, jiraKey: issue.key, kind });
+  } catch (e) {
+    log("warn", "slack notify failed", { channel: customer.slack_channel, jiraKey: issue.key, error: e.message });
+  }
 }
 
 async function processCustomer(customer, ctx) {
@@ -105,6 +122,7 @@ async function processCustomer(customer, ctx) {
           log("info", "created", { jiraKey: issue.key, taskGid });
         }
         created++;
+        await notifySlack(ctx, customer, "new", issue, null);
       } else if (mapping.last_status !== status) {
         if (env.dryRun) {
           log("info", "would update status", { jiraKey: issue.key, from: mapping.last_status, to: status });
@@ -118,6 +136,7 @@ async function processCustomer(customer, ctx) {
           log("info", "updated status", { jiraKey: issue.key, from: mapping.last_status, to: status });
         }
         updated++;
+        await notifySlack(ctx, customer, "update", issue, { from: mapping.last_status, to: status });
       }
     } catch (e) {
       errors++;
@@ -141,12 +160,13 @@ async function main() {
   const db = state.open(env.dbPath);
   const jira = jiraModule.makeClient(env);
   const asana = asanaModule.makeClient(env);
+  const slack = slackModule.makeClient(env);
 
-  log("info", "run started", { customers: customers.length, dryRun: env.dryRun, lookbackMinutes: env.lookbackMinutes, onlyCustomer: env.onlyCustomer || null, fullSync: env.lookbackMinutes <= 0 });
+  log("info", "run started", { customers: customers.length, dryRun: env.dryRun, lookbackMinutes: env.lookbackMinutes, onlyCustomer: env.onlyCustomer || null, fullSync: env.lookbackMinutes <= 0, slack: !!slack });
 
   const totals = { created: 0, updated: 0, errors: 0, total: 0 };
   for (const c of customers) {
-    const r = await processCustomer(c, { jira, asana, db, env });
+    const r = await processCustomer(c, { jira, asana, db, env, slack });
     log("info", "customer done", { customer: c.name, ...r });
     totals.created += r.created || 0;
     totals.updated += r.updated || 0;
