@@ -10,6 +10,6 @@ WORKDIR /app
 COPY --from=build /app /app
 ENV NODE_ENV=production
 ENV DB_PATH=/data/state.db
-RUN useradd -u 1000 -m sync && mkdir -p /data && chown -R sync:sync /data /app
-USER sync
+RUN mkdir -p /data && chown -R node:node /data /app
+USER node
 CMD ["node", "src/index.js"]

@@ -1,15 +1,18 @@
 # jira-asana-sync
 
-One-way sync from Jira to Asana. Reads recently updated Jira issues per customer, creates Asana tasks in each customer's existing project under a "Tickets" section, and keeps a "Jira Status" custom field in sync. Runs as a Kubernetes CronJob on tam-ah-admin-cluster.
+One-way sync from Jira to Asana. Reads recently updated Jira issues per customer, creates Asana tasks in each customer's project under a "Tickets" section, and keeps a "Jira Status" custom field in sync. Runs as a Kubernetes CronJob on tam-ah-admin-cluster.
+
+> **What changed:** you now configure a customer with just the **exact Asana project name**. On each run the sync resolves that name to a project GID and finds the **Tickets** section, **creating it if it doesn't exist**. You no longer have to look up project/section GIDs by hand. (Hard-coded GIDs are still honored if you prefer them.)
 
 ## How it works
 
 Every 10 minutes the CronJob runs `node src/index.js`, which loops over `customers.yaml` and for each entry:
 
-1. Runs the configured JQL with `AND updated >= -20m` appended.
-2. For each issue, looks up the Asana task GID in a SQLite state DB. If missing, falls back to an Asana search by Jira Key custom field.
-3. If no Asana task exists, creates one in the project, moves it into the Tickets section, sets the Jira Key and Jira Status fields. New status enum values are added on the fly.
-4. If a task exists and the status changed since last run, updates the Jira Status field.
+1. Resolves `asana_project_name` to a project GID (searching your workspaces), then finds the `Tickets` section, creating it if missing.
+2. Runs the configured JQL with `AND updated >= -20m` appended.
+3. For each issue, looks up the Asana task GID in a SQLite state DB. If missing, falls back to an Asana search by Jira Key custom field.
+4. If no Asana task exists, creates one in the project, moves it into the Tickets section, sets the Jira Key and Jira Status fields. New status enum values are added on the fly.
+5. If a task exists and the status changed since last run, updates the Jira Status field.
 
 State lives in `/data/state.db` on a 1Gi PVC. Losing the PVC is recoverable, the search fallback rebuilds the map on the next run.
 
@@ -20,27 +23,30 @@ State lives in `/data/state.db` on a 1Gi PVC. Losing the PVC is recoverable, the
 3. On each customer's Asana project, add two custom fields:
    - `Jira Key` (text)
    - `Jira Status` (single-select, no initial options needed)
-4. Each customer's Asana project must already have a section named `Tickets`.
+4. Know the **exact name** of each customer's Asana project. That's it — the `Tickets` section is created automatically on the first run if it isn't already there.
 
-## Get the Asana GIDs you need
+## Configure `customers.yaml`
+
+```yaml
+customers:
+  - name: Bank of America
+    jira_jql: 'project = Support AND "Customer Domain" in ("bofa.com") AND (createdDate >= "2026-01-01" OR status not in (Resolved, Closed))'
+    asana_project_name: "Bank of America — Support"
+    # tickets_section: "Tickets"      # optional, this is the default
+    # asana_workspace_gid: "1128..."  # optional, only if the name is ambiguous
+    # asana_project_gid: "1214..."    # optional, skip name resolution entirely
+    # asana_section_gid: "1216..."    # optional, skip section lookup entirely
+```
+
+Required per customer: `name`, `jira_jql`, and either `asana_project_name` or `asana_project_gid`.
+
+If the same project name exists in more than one workspace you belong to, resolution fails with an "ambiguous" error — set `asana_workspace_gid` (or a hard `asana_project_gid`) for that customer. To find a workspace GID:
 
 ```pwsh
 $pat = '<your asana PAT>'
 $h = @{ Authorization = "Bearer $pat" }
-
-# List your projects to find project GIDs
-Invoke-RestMethod -Headers $h `
-  -Uri 'https://app.asana.com/api/1.0/users/me/workspaces'
-
-Invoke-RestMethod -Headers $h `
-  -Uri 'https://app.asana.com/api/1.0/workspaces/<WORKSPACE_GID>/projects?archived=false'
-
-# For a given project, find the Tickets section GID
-Invoke-RestMethod -Headers $h `
-  -Uri 'https://app.asana.com/api/1.0/projects/<PROJECT_GID>/sections'
+Invoke-RestMethod -Headers $h -Uri 'https://app.asana.com/api/1.0/workspaces'
 ```
-
-Fill `customers.yaml` with the GIDs.
 
 ## Build and deploy
 
@@ -76,15 +82,9 @@ kb apply -f k8s/cronjob.yaml
 # Run once on demand
 kb -n jira-asana-sync create job --from=cronjob/jira-asana-sync sync-manual-1
 kb -n jira-asana-sync logs -l job-name=sync-manual-1 -f
-
-# Or run a dry-run first
-kb -n jira-asana-sync create job dry-run --from=cronjob/jira-asana-sync `
-  --dry-run=client -o yaml |
-  ConvertFrom-Yaml |  # if you have powershell-yaml; otherwise edit manually
-  Out-Null
 ```
 
-Simpler dry-run: build locally with podman and run with `DRY_RUN=true`.
+Dry-run locally with podman (name resolution runs, but no tasks or sections are created):
 
 ```pwsh
 podman build --no-cache --pull -f Containerfile -t jira-asana-sync:dev .
@@ -108,6 +108,6 @@ podman run --rm `
 ## Limits and caveats
 
 - One-way only. Edits in Asana never go back to Jira.
-- Comments, attachments, and assignee changes in Jira are not synced. Add them if you need them, the structure is there.
+- Project-name resolution scans your workspaces' projects once per run and caches the result. Duplicate project names across workspaces require `asana_workspace_gid`.
 - New Jira status names become new enum options on the Asana field. They will not be deleted automatically if a workflow status is renamed.
 - Asana free-tier rate limit is 150 requests per minute. With 8 customers and modest volume you will not hit this.

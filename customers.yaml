@@ -1,8 +1,21 @@
 # Per-customer mapping.
 # One entry per customer. The script loops over all of them every run.
+#
+# You now only need the *exact* Asana project name. At runtime the sync:
+#   1. resolves the project name to its GID (searching your workspaces), and
+#   2. finds the "Tickets" section, creating it if it does not exist.
+#
+# Optional overrides:
+#   asana_workspace_gid  - pin resolution to one workspace (required only if the
+#                          same project name exists in more than one workspace,
+#                          or you belong to many workspaces and want to skip the scan)
+#   tickets_section      - section name to use/create (default: "Tickets")
+#   asana_project_gid    - hard-code the GID and skip name resolution entirely
+#   asana_section_gid    - hard-code the section GID and skip section lookup
 
 customers:
   - name: Bank of America
     jira_jql: 'project = Support AND "Customer Domain" in ("bofa.com") AND (createdDate >= "2026-01-01" OR status not in (Resolved, Closed))'
-    asana_project_gid: "1214952869184873"
-    asana_section_gid: "1216090535610894"
+    asana_project_name: "Bank of America — Support"
+    # tickets_section: "Tickets"        # optional, this is the default
+    # asana_workspace_gid: "1128..."    # optional, only if name is ambiguous

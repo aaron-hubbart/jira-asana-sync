@@ -1,0 +1,96 @@
+# Control API + static web, behind one Ingress with IAP.
+# Namespace assumed to exist (created by jira-asana-sync/k8s/namespace-and-config.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syncops-api
+  namespace: jira-asana-sync
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: syncops-api } }
+  template:
+    metadata: { labels: { app: syncops-api } }
+    spec:
+      serviceAccountName: syncops-api        # from rbac.yaml
+      containers:
+        - name: api
+          image: gcr.io/tam-aaron-hubbart/syncops-api:latest
+          ports: [{ containerPort: 8080 }]
+          env:
+            - { name: SYNC_NAMESPACE, value: jira-asana-sync }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits:   { cpu: 250m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: syncops-api
+  namespace: jira-asana-sync
+  annotations: { cloud.google.com/backend-config: '{"default":"syncops-iap"}' }
+spec:
+  selector: { app: syncops-api }
+  ports: [{ port: 80, targetPort: 8080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: syncops-web
+  namespace: jira-asana-sync
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: syncops-web } }
+  template:
+    metadata: { labels: { app: syncops-web } }
+    spec:
+      containers:
+        - name: web
+          image: gcr.io/tam-aaron-hubbart/syncops-web:latest
+          ports: [{ containerPort: 8080 }]
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits:   { cpu: 100m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: syncops-web
+  namespace: jira-asana-sync
+  annotations: { cloud.google.com/backend-config: '{"default":"syncops-iap"}' }
+spec:
+  selector: { app: syncops-web }
+  ports: [{ port: 80, targetPort: 8080 }]
+---
+# Turn on Identity-Aware Proxy for BOTH backends. Create the OAuth client and
+# store it in a Secret named syncops-iap-oauth (keys: client_id, client_secret).
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: syncops-iap
+  namespace: jira-asana-sync
+spec:
+  iap:
+    enabled: true
+    oauthclientCredentials:
+      secretName: syncops-iap-oauth
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: syncops
+  namespace: jira-asana-sync
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    # networking.gke.io/managed-certificates: syncops-cert   # add a ManagedCertificate for HTTPS
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: syncops-api, port: { number: 80 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: syncops-web, port: { number: 80 } } }

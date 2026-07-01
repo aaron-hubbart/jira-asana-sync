@@ -1,0 +1,44 @@
+# Least-privilege RBAC for the Control API. Scoped to the jira-asana-sync
+# namespace only. Deliberately grants NO access to jira-asana-sync-secrets.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: syncops-api
+  namespace: jira-asana-sync
+  annotations:
+    # Workload Identity: bind to a GSA if the API needs Google APIs. Not needed
+    # just to reach the in-cluster API server (the mounted SA token covers that).
+    iam.gke.io/gcp-service-account: syncops-api@tam-aaron-hubbart.iam.gserviceaccount.com
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: syncops-api
+  namespace: jira-asana-sync
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: syncops-api
+  namespace: jira-asana-sync
+subjects:
+  - kind: ServiceAccount
+    name: syncops-api
+    namespace: jira-asana-sync
+roleRef:
+  kind: Role
+  name: syncops-api
+  apiGroup: rbac.authorization.k8s.io

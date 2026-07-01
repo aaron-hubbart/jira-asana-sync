@@ -33,6 +33,28 @@ function buildAsanaNotes(issue, jiraBaseUrl) {
 
 async function processCustomer(customer, ctx) {
   const { jira, asana, db, env } = ctx;
+
+  // Resolve the Asana target from the project NAME (unless GIDs are hard-coded).
+  // Creates the Tickets section if it does not exist (skipped on dry runs).
+  let projectGid, sectionGid;
+  try {
+    projectGid =
+      customer.asana_project_gid ||
+      (await asana.resolveProjectGid(customer.asana_project_name, customer.asana_workspace_gid));
+    sectionGid =
+      customer.asana_section_gid ||
+      (await asana.ensureSection(projectGid, customer.tickets_section || "Tickets", { create: !env.dryRun }));
+    log("info", "resolved asana target", {
+      customer: customer.name,
+      project: customer.asana_project_name || projectGid,
+      projectGid,
+      sectionGid: sectionGid || "(dry-run: would create)",
+    });
+  } catch (e) {
+    log("error", "asana resolve failed", { customer: customer.name, error: e.message });
+    return { created: 0, updated: 0, errors: 1 };
+  }
+
   const jql = buildJqlWithLookback(customer.jira_jql, env.lookbackMinutes);
   log("info", "querying jira", { customer: customer.name, jql });
 
@@ -53,7 +75,7 @@ async function processCustomer(customer, ctx) {
 
       // Fall back to Asana search if DB has no record (handles fresh DB).
       if (!mapping) {
-        const existingGid = await asana.findTaskByJiraKey(customer.asana_project_gid, issue.key);
+        const existingGid = await asana.findTaskByJiraKey(projectGid, issue.key);
         if (existingGid) {
           state.upsertMapping(db, issue.key, existingGid, null);
           mapping = state.getMapping(db, issue.key);
@@ -65,8 +87,8 @@ async function processCustomer(customer, ctx) {
           log("info", "would create", { jiraKey: issue.key, customer: customer.name });
         } else {
           const taskGid = await asana.createTask({
-            projectGid: customer.asana_project_gid,
-            sectionGid: customer.asana_section_gid,
+            projectGid,
+            sectionGid,
             name: buildAsanaName(issue),
             notes: buildAsanaNotes(issue, env.jiraBaseUrl),
             jiraKey: issue.key,
@@ -81,7 +103,7 @@ async function processCustomer(customer, ctx) {
           log("info", "would update status", { jiraKey: issue.key, from: mapping.last_status, to: status });
         } else {
           await asana.updateTaskStatus({
-            projectGid: customer.asana_project_gid,
+            projectGid,
             taskGid: mapping.asana_task_gid,
             jiraStatus: status,
           });

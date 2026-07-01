@@ -1,0 +1,19 @@
+{
+  "name": "syncops-api",
+  "version": "1.0.0",
+  "description": "Control-plane API for jira-asana-sync: reads/writes the config ConfigMap, patches the CronJob, and launches manual/dry-run Jobs on GKE.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "KUBECONFIG_LOCAL=true REQUIRE_IAP=false node src/server.js"
+  },
+  "dependencies": {
+    "@kubernetes/client-node": "^0.22.1",
+    "express": "^4.21.0",
+    "js-yaml": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
